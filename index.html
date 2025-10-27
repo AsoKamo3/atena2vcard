@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSV → vCard 3.0 変換（Flask版）</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+           max-width: 760px; margin: 48px auto; padding: 0 16px; }
+    h1 { font-size: 22px; }
+    .card { border: 1px solid #eee; border-radius: 12px; padding: 16px; margin: 16px 0; box-shadow: 0 2px 10px rgba(0,0,0,.04); }
+    button { background: #2d89ef; color: #fff; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+    button:hover { background: #1b5fad; }
+    #status { margin-top: 8px; font-size: 13px; color: #555; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>📇 CSV → vCard 3.0 変換（Flask版）</h1>
+
+  <div class="card">
+    <input type="file" id="fileInput" accept=".csv" />
+    <button id="runBtn">変換してダウンロード</button>
+    <div id="status"></div>
+  </div>
+
+  <details class="card">
+    <summary>対応仕様（クリックで展開）</summary>
+    <ul>
+      <li>vCard 3.0 / UTF-8（Apple連絡先互換）</li>
+      <li>FN は「名 姓」、N は「姓;名;;;」</li>
+      <li>ORG は「会社名;部署1 部署2」、X-PHONETIC-ORG、TITLE対応</li>
+      <li>ADR は 7 区切り（street;locality;region;postal;日本）</li>
+      <li>電話／メールは <code>;</code> 区切りで複数展開、090/080/070 は携帯（CELL）</li>
+      <li>備考1〜3 → NOTE、メモ1〜5 → item5〜9（X-ABLabel付き）</li>
+      <li>空欄は自動で出力除外、NaN対策済み</li>
+    </ul>
+  </details>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
