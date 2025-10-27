@@ -1,5 +1,4 @@
-import io, re
-import pandas as pd
+import io, re, csv
 from flask import Flask, render_template, request, send_file, abort
 
 app = Flask(__name__)
@@ -18,7 +17,7 @@ def split_multi(value):
 def normalize_phone(num: str) -> str:
     if not isinstance(num, str) or not num.strip():
         return ""
-    lead_plus = num.strip().startswith("+")
+    lead_plus = num.strip().startsWith("+") if hasattr(str, "startsWith") else num.strip().startswith("+")
     digits = "".join(re.findall(r"\d", num))
     return ("+" + digits) if (lead_plus and digits) else digits
 
@@ -64,36 +63,36 @@ def row_to_vcard(row: dict) -> str:
     L = ["BEGIN:VCARD", "VERSION:3.0"]
 
     # --- 名前（FN は「名 姓」） ---
-    family = row.get("姓", "").strip()
-    given  = row.get("名", "").strip()
+    family = (row.get("姓") or "").strip()
+    given  = (row.get("名") or "").strip()
     if family or given:
         L.append(f"N:{esc(family)};{esc(given)};;;")
         L.append(f"FN:{esc(given)} {esc(family)}")
-    nick = row.get("ニックネーム", "").strip()
+    nick = (row.get("ニックネーム") or "").strip()
     if nick:
         L.append(f"NICKNAME:{esc(nick)}")
-    fk = row.get("姓かな", "").strip()
-    gk = row.get("名かな", "").strip()
+    fk = (row.get("姓かな") or "").strip()
+    gk = (row.get("名かな") or "").strip()
     if fk: L.append(f"X-PHONETIC-LAST-NAME:{esc(fk)}")
     if gk: L.append(f"X-PHONETIC-FIRST-NAME:{esc(gk)}")
 
     # --- 組織 ---
-    company = row.get("会社名", "").strip()
-    dept1 = row.get("部署名1", "").strip()
-    dept2 = row.get("部署名2", "").strip()
+    company = (row.get("会社名") or "").strip()
+    dept1 = (row.get("部署名1") or "").strip()
+    dept2 = (row.get("部署名2") or "").strip()
     dept = " ".join([d for d in [dept1, dept2] if d])
     if company or dept:
         L.append(f"ORG:{esc(company)};{esc(dept)}")
-    org_kana = row.get("会社名かな", "").strip()
+    org_kana = (row.get("会社名かな") or "").strip()
     if org_kana:
         L.append(f"X-PHONETIC-ORG:{esc(org_kana)}")
-    title = row.get("役職名", "").strip()
+    title = (row.get("役職名") or "").strip()
     if title:
         L.append(f"TITLE:{esc(title)}")
 
     # --- 電話（複数可、携帯自動判定）---
     for label, key in [("WORK", "会社電話"), ("HOME", "自宅電話"), ("CELL", "携帯番号")]:
-        for raw in split_multi(row.get(key, "")):
+        for raw in split_multi(row.get(key, "") or ""):
             num = normalize_phone(raw)
             if not num:
                 continue
@@ -102,7 +101,7 @@ def row_to_vcard(row: dict) -> str:
 
     # --- メール（複数可）---
     for label, key in [("WORK", "会社E-mail"), ("HOME", "自宅E-mail"), ("OTHER", "その他E-mail")]:
-        for mail in split_multi(row.get(key, "")):
+        for mail in split_multi(row.get(key, "") or ""):
             if mail:
                 L.append(f"EMAIL;TYPE=INTERNET,{label}:{esc(mail)}")
 
@@ -111,14 +110,14 @@ def row_to_vcard(row: dict) -> str:
     if adr: L.append(adr)
 
     # --- 備考 NOTE（備考1〜3 を改行結合）---
-    notes = [row.get(f"備考{i}", "").strip() for i in range(1, 4)]
+    notes = [(row.get(f"備考{i}") or "").strip() for i in range(1, 4)]
     notes = [n for n in notes if n]
     if notes:
         L.append(f"NOTE:{esc('\\n'.join(notes))}")
 
     # --- メモ item5〜9（Apple拡張）---
     for i in range(1, 6):
-        val = row.get(f"メモ{i}", "").strip()
+        val = (row.get(f"メモ{i}") or "").strip()
         if val:
             idx = i + 4
             L.append(f"item{idx}.X-ABRELATEDNAMES:{esc(val)}")
@@ -126,6 +125,27 @@ def row_to_vcard(row: dict) -> str:
 
     L.append("END:VCARD")
     return "\n".join(L)
+
+# ---------- CSV→行辞書の読み取り ----------
+def read_csv_rows(file_bytes: bytes):
+    # 代表的な文字コードを順に試す
+    encodings = ["utf-8", "utf-8-sig", "cp932", "shift_jis"]
+    last_err = None
+    for enc in encodings:
+        try:
+            text = file_bytes.decode(enc)
+            f = io.StringIO(text)
+            reader = csv.DictReader(f)
+            rows = []
+            for row in reader:
+                # None → "" に統一（NaN対策）
+                clean = { (k or "").strip(): (v if v is not None else "") for k,v in row.items() }
+                rows.append(clean)
+            return rows
+        except Exception as e:
+            last_err = e
+            continue
+    raise ValueError(f"CSVの読み込みに失敗しました（文字コードの可能性）。最後のエラー: {last_err}")
 
 # ---------- ルーティング ----------
 @app.get("/")
@@ -138,21 +158,13 @@ def convert():
         abort(400, "file is required")
     f = request.files["file"]
     data = f.read()
-    # 代表的な文字コードを順に試す
-    tried = ["utf-8", "utf-8-sig", "cp932", "shift_jis"]
-    df = None
-    for enc in tried:
-        try:
-            df = pd.read_csv(io.BytesIO(data), dtype=str, encoding=enc).fillna("")
-            break
-        except Exception:
-            continue
-    if df is None:
-        abort(400, "CSVの読み込みに失敗しました（文字コードを確認してください）")
 
-    # vCard生成
-    vcards = [row_to_vcard({k: (v if isinstance(v, str) else str(v)) for k, v in row.items()})
-              for _, row in df.iterrows()]
+    try:
+        rows = read_csv_rows(data)
+    except Exception as e:
+        abort(400, f"CSVの読み込みに失敗しました: {e}")
+
+    vcards = [row_to_vcard(r) for r in rows]
     payload = ("\n".join(vcards)).encode("utf-8")
 
     return send_file(
@@ -162,7 +174,6 @@ def convert():
         download_name="contacts.vcf",
     )
 
-# ヘルスチェック（任意）
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
